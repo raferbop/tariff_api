@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customs Calculator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #1a4789;
+            --primary-hover: #2c5aa0;
+            --secondary-color: #f8fafc;
+            --accent-color: #64748b;
+            --success-color: #059669;
+            --border-color: #e2e8f0;
+        }
+
+        body {
+            background-color: #f1f5f9;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+
+        .custom-container {
+            max-width: 1000px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .card {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 
+                        0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            padding: 2rem;
+        }
+
+        .form-section {
+            border-radius: 0.5rem;
+            background-color: var(--secondary-color);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .section-title {
+            color: var(--primary-color);
+            font-weight: 600;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--primary-color);
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--accent-color);
+            margin-bottom: 0.5rem;
+        }
+
+        .form-input,
+        .form-select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+        }
+
+        .form-input:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(26, 71, 137, 0.1);
+        }
+
+        .form-input::placeholder {
+            color: #94a3b8;
+        }
+
+        .submit-btn {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            width: 100%;
+            transition: all 0.2s ease;
+        }
+
+        .submit-btn:hover {
+            background-color: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+
+        .submit-btn:active {
+            transform: translateY(0);
+        }
+
+        .results-section {
+            margin-top: 2rem;
+        }
+
+        .results-card {
+            background: white;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-top: 1rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .results-title {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--primary-color);
+            margin-bottom: 0.5rem;
+        }
+
+        pre {
+            background-color: #f8fafc;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.875rem;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+        }
+
+        /* Responsive grid */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1rem;
+        }
+
+        /* Loading state */
+        .loading {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        /* Error state */
+        .error-state {
+            border-color: #ef4444;
+            background-color: #fee2e2;
+        }
+    </style>
+</head>
+<body>
+    <div class="custom-container">
+        <div class="card">
+            <h1 class="text-3xl font-bold text-center mb-8 text-gray-800">Customs Calculator</h1>
+            
+            <form id="calculatorForm">
+                <div class="form-section">
+                    <h2 class="section-title">Product Information</h2>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">HS Code</label>
+                            <input type="text" name="hs_code" required 
+                                   class="form-input" 
+                                   placeholder="e.g. 8471.30.00">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Transaction Type</label>
+                            <select name="transaction_type" required class="form-select">
+                                <option value="IMS4" selected>Household or Personal Item</option>
+                                <option value="IM4">Commercial Cargo</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Package Type</label>
+                            <select name="package_type" required class="form-select">
+                                <option value="general">Package or Box</option>
+                                <option value="motor vehicle">Motor Vehicle</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Product Price</label>
+                            <input type="number" name="product_price" 
+                                   step="0.01" min="0.01" required 
+                                   class="form-input" 
+                                   placeholder="e.g. 1000.00">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Product Currency</label>
+                            <select name="product_currency" required class="form-select">
+                                <option value="USD">USD</option>
+                                <option value="JMD">JMD</option>
+                                <option value="EUR">EUR</option>
+                                <option value="GBP">GBP</option>
+                                <option value="CAD">CAD</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h2 class="section-title">Shipping Information</h2>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">Freight Charges</label>
+                            <input type="number" name="freight_charges" 
+                                   step="0.01" min="0" required 
+                                   class="form-input" 
+                                   placeholder="e.g. 100.00">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Freight Currency</label>
+                            <select name="freight_currency" required class="form-select">
+                                <option value="USD">USD</option>
+                                <option value="JMD">JMD</option>
+                                <option value="EUR">EUR</option>
+                                <option value="GBP">GBP</option>
+                                <option value="CAD">CAD</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Mode of Transportation</label>
+                            <select name="mode_of_transportation" required class="form-select">
+                                <option value="air">Air Freight</option>
+                                <option value="ocean">Ocean Freight</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="submit-btn">
+                    Calculate Customs Charges
+                </button>
+            </form>
+
+            <div class="results-section">
+                <h3 class="section-title">Calculation Results</h3>
+                
+                <!-- CIF Summary -->
+                <div class="results-card mb-6">
+                    <h4 class="results-title">CIF Summary</h4>
+                    <table class="w-full text-sm">
+                        <tbody id="cifSummary">
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Tax Charges Breakdown -->
+                <div class="results-card">
+                    <h4 class="results-title">Charges Breakdown</h4>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="px-4 py-2 text-left">Tax Type</th>
+                                    <th class="px-4 py-2 text-right">Rate</th>
+                                    <th class="px-4 py-2 text-right">Amount (JMD)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="chargesBreakdown">
+                            </tbody>
+                            <tfoot>
+                                <tr class="font-semibold border-t-2">
+                                    <td class="px-4 py-2">Total Charges</td>
+                                    <td class="px-4 py-2"></td>
+                                    <td class="px-4 py-2 text-right" id="totalCharges"></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('calculatorForm');
+        const cifResponseDiv = document.getElementById('cifResponse');
+        const customsResponseDiv = document.getElementById('customsResponse');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Add loading state
+            form.classList.add('loading');
+            const submitBtn = form.querySelector('button[type="submit"]');
+            submitBtn.textContent = 'Calculating...';
+
+            const formData = new FormData(form);
+            const data = {};
+            
+            formData.forEach((value, key) => {
+                data[key] = value;
+            });
+
+            try {
+                const response = await fetch('/calculate-customs', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                
+                // Display CIF Summary
+                const cifSummaryTable = document.getElementById('cifSummary');
+                const cifDetails = result.cif_details;
+                cifSummaryTable.innerHTML = `
+                    <tr>
+                        <td class="px-4 py-2 font-medium">Product Price:</td>
+                        <td class="px-4 py-2 text-right">${cifDetails.product_price_original.toFixed(2)} ${cifDetails.product_currency}</td>
+                        <td class="px-4 py-2 text-right">${cifDetails.product_price_jmd.toFixed(2)} JMD</td>
+                    </tr>
+                    <tr>
+                        <td class="px-4 py-2 font-medium">Freight Charges:</td>
+                        <td class="px-4 py-2 text-right">${cifDetails.freight_charges_original.toFixed(2)} ${cifDetails.freight_currency}</td>
+                        <td class="px-4 py-2 text-right">${cifDetails.freight_charges_jmd.toFixed(2)} JMD</td>
+                    </tr>
+                    <tr>
+                        <td class="px-4 py-2 font-medium">Insurance:</td>
+                        <td class="px-4 py-2 text-right">${cifDetails.insurance_original_currency.toFixed(2)} ${cifDetails.product_currency}</td>
+                        <td class="px-4 py-2 text-right">${cifDetails.insurance_jmd.toFixed(2)} JMD</td>
+                    </tr>
+                    <tr class="font-semibold border-t">
+                        <td class="px-4 py-2">CIF Value:</td>
+                        <td class="px-4 py-2 text-right">${cifDetails.cif_usd.toFixed(2)} USD</td>
+                        <td class="px-4 py-2 text-right">${cifDetails.cif_jmd.toFixed(2)} JMD</td>
+                    </tr>
+                `;
+
+                // Display Charges Breakdown
+                const chargesTable = document.getElementById('chargesBreakdown');
+                const totalChargesCell = document.getElementById('totalCharges');
+                let chargesHtml = '';
+
+                // Process each charge except total
+                Object.entries(result.charges).forEach(([key, value]) => {
+                    if (key !== 'total_custom_charges') {
+                        const taxRate = result.tax_rates[key] ? (result.tax_rates[key] * 100).toFixed(2) : '-';
+                        chargesHtml += `
+                            <tr>
+                                <td class="px-4 py-2">${key}</td>
+                                <td class="px-4 py-2 text-right">${taxRate}%</td>
+                                <td class="px-4 py-2 text-right">${value.toFixed(2)}</td>
+                            </tr>
+                        `;
+                    }
+                });
+
+                chargesTable.innerHTML = chargesHtml;
+                totalChargesCell.textContent = result.total_custom_charges.toFixed(2);
+                
+                // Reset error styling if present
+                document.querySelector('.results-section').classList.remove('error-state');
+            } catch (error) {
+                cifResponseDiv.textContent = 'Error occurred';
+                customsResponseDiv.textContent = error.message;
+                cifResponseDiv.parentElement.classList.add('error-state');
+                customsResponseDiv.parentElement.classList.add('error-state');
+            } finally {
+                // Remove loading state
+                form.classList.remove('loading');
+                submitBtn.textContent = 'Calculate Customs Charges';
+            }
+        });
+    </script>
+</body>
+</html>
