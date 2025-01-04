@@ -1,87 +1,84 @@
 import logging
-from sqlalchemy import create_engine, desc
+from sqlalchemy import desc
 from sqlalchemy.exc import SQLAlchemyError
-from utils.database import Currency, FXRate, TaxRate, SessionLocal as db
-from config.config import CURRENCY_MAP, REVERSE_CURRENCY_MAP
+from sqlalchemy.orm import Session
+from utils.database import Currency, FXRate, TaxRate, SessionLocal
+from utils.currency_mapping import CurrencyMapper
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_currency_code(currency):
-    logger.info(f"Getting currency code for: {currency}")
+def fetch_currency_rate(currency: str, db: Session) -> float:
+    """
+    Fetch currency rate from database.
+    For foreign currencies, returns how many JMD per unit of foreign currency.
+    For JMD returns 1.0 since it's the base currency.
     
-    # Check if the input is already a currency code
-    if currency.upper() in CURRENCY_MAP:
-        return currency.upper()
-    
-    # Check if the input matches a full currency name
-    if currency.upper() in REVERSE_CURRENCY_MAP:
-        return REVERSE_CURRENCY_MAP[currency.upper()]
-    
-    # If not found, try to match based on partial name
-    for code, name in CURRENCY_MAP.items():
-        if currency.upper() in name:
-            logger.info(f"Found currency code: {code}")
-            return code
-    
-    logger.warning(f"Currency code not found for {currency}")
-    return None
-
-def fetch_currency_rate(currency):
+    Args:
+        currency: ISO currency code (e.g., 'USD') or database currency name
+        db: Database session
+        
+    Returns:
+        float: Exchange rate in JMD
+    """
     logger.info(f"Fetching rate for currency: {currency}")
-
-    currency_code = get_currency_code(currency)
-    logger.info(f"Currency code: {currency_code}")
     
-    if not currency_code:
-        logger.warning(f"Warning: Currency code not found for {currency}")
-        return 1.0  # Default to 1.0 if currency is not found
+    # Special case for JMD since it's the base currency
+    if currency.upper() == 'JMD':
+        logger.info("Base currency (JMD) - using rate of 1.0")
+        return 1.0
     
     try:
-        # Create a new session
-        session = SessionLocal()
+        # Convert ISO code to database name if necessary
         try:
-            # Get the most recent date
-            latest_date = session.query(FXRate.date).order_by(desc(FXRate.date)).first()
+            db_currency_name = CurrencyMapper.get_db_name(currency)
+        except ValueError:
+            # If not a valid ISO code, try using it directly (might already be database name)
+            if not CurrencyMapper.is_valid_db_name(currency):
+                raise ValueError(f"Unrecognized currency: {currency}")
+            db_currency_name = currency
             
-            if latest_date:
-                # Try to find the rate using the currency code and the most recent date
-                fx_rate = session.query(FXRate).filter(
-                    FXRate.date == latest_date[0],
-                    FXRate.currency == CURRENCY_MAP[currency_code]
-                ).first()
-                
-                logger.info(f"Query result: {fx_rate}")
-                
-                if fx_rate:
-                    rate = fx_rate.selling_rate
-                    logger.info(f"Found selling rate for {currency}: {rate}")
-                    return rate
-                else:
-                    logger.warning(f"No exchange rate found for {currency_code} on {latest_date[0]}")
-            else:
-                logger.warning("No FX rate data available in the database.")
-        finally:
-            session.close()
-    except SQLAlchemyError as e:
-        logger.error(f"Database error when querying exchange rate: {str(e)}")
+        # Get the most recent date
+        latest_date = db.query(FXRate.date).order_by(desc(FXRate.date)).first()
+        if not latest_date:
+            raise ValueError("No FX rates available in database")
+        
+        # Get the rate using exact currency name from database
+        fx_rate = db.query(FXRate).filter(
+            FXRate.date == latest_date[0],
+            FXRate.currency == db_currency_name
+        ).first()
+        
+        if fx_rate:
+            rate = fx_rate.selling_rate
+            logger.info(f"Found selling rate for {db_currency_name}: {rate}")
+            return rate
+        else:
+            raise ValueError(f"No exchange rate found for {db_currency_name} on {latest_date[0]}")
+            
     except Exception as e:
-        logger.error(f"Unexpected error when querying exchange rate: {str(e)}")
-    
-    logger.warning(f"Warning: Exchange rate not found for {currency} ({currency_code})")
-    return 1.0  # Default to 1.0 if rate is not found
+        logger.error(f"Error fetching currency rate: {str(e)}")
+        raise
 
-def calculate_cif(product_price, product_currency, freight_charges, freight_currency, mode_of_transportation):
+def calculate_cif(
+    product_price: float,
+    product_currency: str,
+    freight_charges: float,
+    freight_currency: str,
+    mode_of_transportation: str,
+    db: Session
+):
     """
     Calculate CIF value in original currency, JMD, and USD.
     
     Parameters:
     product_price (float): The price of the product
-    product_currency (str): The currency code of the product price
+    product_currency (str): The currency name as it appears in database
     freight_charges (float): The freight charges
-    freight_currency (str): The currency code of the freight charges
+    freight_currency (str): The currency name as it appears in database
     mode_of_transportation (str): The mode of transportation ('air' or 'ocean')
+    db (Session): Database session for currency rate lookups
     
     Returns:
     dict: A dictionary containing CIF values and related information
@@ -90,35 +87,35 @@ def calculate_cif(product_price, product_currency, freight_charges, freight_curr
                 f"freight_charges={freight_charges} {freight_currency}, "
                 f"mode_of_transportation={mode_of_transportation}")
 
-    # Fetch exchange rates (now using selling rates)
-    jmd_rate = fetch_currency_rate('JMD')
-    usd_rate = fetch_currency_rate('USD')
-    product_rate = fetch_currency_rate(product_currency)
-    freight_rate = fetch_currency_rate(freight_currency)
+    # Fetch exchange rates (returns JMD per unit of foreign currency)
+    product_rate = fetch_currency_rate(product_currency, db)
+    freight_rate = fetch_currency_rate(freight_currency, db)
+    usd_rate = fetch_currency_rate('U.S. DOLLAR', db)  # For USD conversion
 
-    logger.info(f"Exchange rates (selling): JMD={jmd_rate}, USD={usd_rate}, "
-                f"{product_currency}={product_rate}, {freight_currency}={freight_rate}")
+    logger.info(f"Exchange rates: {product_currency}={product_rate}, "
+                f"{freight_currency}={freight_rate}, USD={usd_rate}")
 
     # Calculate values in JMD
     product_price_jmd = round(product_price * product_rate, 2)
     freight_charges_jmd = round(freight_charges * freight_rate, 2)
 
-    # Calculate values in USD
+    # Calculate values in USD (divide by USD rate since rate is JMD per USD)
     product_price_usd = round(product_price_jmd / usd_rate, 2)
     freight_charges_usd = round(freight_charges_jmd / usd_rate, 2)
 
     # Calculate CIF in original currencies
     cif_original = round(product_price + freight_charges, 2)
 
-    # Calculate insurance in original currency
+    # Calculate insurance based on mode of transportation
     if mode_of_transportation.lower() == 'air':
-        insurance_original = round(cif_original * 0.01, 2)  # 1% for air cargo
+        insurance_rate = 0.01  # 1% for air cargo
     elif mode_of_transportation.lower() == 'ocean':
-        insurance_original = round(cif_original * 0.015, 2)  # 1.5% for ocean cargo
+        insurance_rate = 0.015  # 1.5% for ocean cargo
     else:
-        insurance_original = 0  # Default to 0 if transportation mode is unknown
+        raise ValueError(f"Invalid mode of transportation: {mode_of_transportation}")
 
-    # Calculate insurance in JMD
+    # Calculate insurance in original currency and JMD
+    insurance_original = round(cif_original * insurance_rate, 2)
     insurance_jmd = round(insurance_original * product_rate, 2)
 
     # Calculate CIF in JMD
@@ -144,28 +141,25 @@ def calculate_cif(product_price, product_currency, freight_charges, freight_curr
         'insurance_jmd': insurance_jmd,
         'mode_of_transportation': mode_of_transportation,
         'exchange_rates': {
-            'JMD': jmd_rate,
+            'JMD': 1.0,  # Base currency
             'USD': usd_rate,
-            product_currency: round(product_rate, 4),
-            freight_currency: round(freight_rate, 4)
+            product_currency: product_rate,
+            freight_currency: freight_rate
         }
     }
 
-    logger.info(f"Insurance in original currency ({product_currency}): {insurance_original:.2f} {product_currency}")
-    logger.info(f"Insurance in JMD: {insurance_jmd:.2f} JMD")
-    logger.info(f"Exchange rate used for conversion to JMD: {product_rate:.4f}")
     logger.info(f"CIF calculation result: {result}")
-    
     return result
 
-def get_tax_rates(hs_code):
+def get_tax_rates(hs_code: str, db: Session):
+    """Get tax rates for a given HS code"""
     logger.info(f"Fetching tax rates for HS code: {hs_code}")
     try:
-        tax_rates = TaxRate.get_rates_for_hs_code(hs_code)
+        tax_rates = db.query(TaxRate).filter_by(hs_code=hs_code).all()
         rates = {}
         if tax_rates:
             for tax_rate in tax_rates:
-                rates[tax_rate.tax_id] = tax_rate.rate  # Assuming 'rate' is the column name
+                rates[tax_rate.tax_id] = tax_rate.rate
             return rates
         else:
             logger.warning(f"No tax rates found for HS code: {hs_code}")
@@ -174,15 +168,72 @@ def get_tax_rates(hs_code):
         logger.error(f"Error querying tax rates: {str(e)}")
         return {}
 
-def calculate_custom_charges(tax_rates, cif, caf):
+def determine_caf_rate(
+    transaction_type: str,
+    package_type: str,
+    cif_value: float,
+    input_currency: str,
+    db: Session
+):
+    """
+    Determines the CAF rate based on the transaction type, package type, CIF value, and input currency.
+    """
+    if not transaction_type:
+        raise ValueError("Transaction type cannot be None")
+    
+    logger.info(f"Determining CAF rate for: transaction_type={transaction_type}, "
+                f"package_type={package_type}, cif_value={cif_value}, input_currency={input_currency}")
+
+    # Check for motor vehicle package type
+    if package_type.lower() == 'motor vehicle':
+        logger.info("Motor vehicle detected. Returning fixed CAF rate of 57500.0 JMD")
+        return 57500.0
+
+    # Convert CIF value to USD if it's not already in USD
+    if input_currency != 'U.S. DOLLAR':
+        usd_rate = fetch_currency_rate('U.S. DOLLAR', db)
+        input_currency_rate = fetch_currency_rate(input_currency, db)
+        cif_value_usd = round(cif_value * (input_currency_rate / usd_rate), 2)
+        logger.info(f"Converted CIF value from {input_currency} to USD: {cif_value_usd}")
+    else:
+        cif_value_usd = cif_value
+        logger.info(f"CIF value already in USD: {cif_value_usd}")
+
+    # Check for IMS4 transaction type (household items)
+    if transaction_type.upper() == 'IMS4':
+        if cif_value_usd < 5000:
+            logger.info("IMS4 transaction with CIF < 5000 USD. Returning CAF rate of 2500.0 JMD")
+            return 2500.0
+        else:
+            logger.info("IMS4 transaction with CIF >= 5000 USD. Treating as IM4, returning CAF rate of 10000.0 JMD")
+            return 10000.0
+
+    # Check for IM4 transaction type (commercial items)
+    if transaction_type.upper() == 'IM4':
+        logger.info("IM4 transaction. Returning fixed CAF rate of 10000.0 JMD")
+        return 10000.0
+
+    # Default case
+    logger.warning(f"Unrecognized transaction type: {transaction_type}. Defaulting to 10000.0 JMD CAF.")
+    return 10000.0
+
+def calculate_custom_charges(tax_rates: dict, cif: float, caf: float) -> tuple[dict, dict]:
+    """
+    Calculate custom charges based on tax rates, CIF value, and CAF.
+    Only ID-01 needs to be converted from percentage to decimal.
+    Other rates are already in decimal form.
+    """
     logger.info(f"\nInitial Values:")
     logger.info(f"CIF: {cif:.2f} JMD")
     logger.info(f"CAF: {caf:.2f} JMD")
 
-    # Convert tax rates to decimal form for calculations
-    decimal_rates = {k: (v/100 if v > 1 else v) for k, v in tax_rates.items()}
+    # Store original tax rates for return value
+    original_rates = tax_rates.copy()
 
-    logger.info(f"\nTax Rates (converted to decimal):")
+    # Convert all tax rates from percentage to decimal
+    decimal_rates = {k: (v/100 if v > 0 else 0) for k, v in tax_rates.items()}
+
+    logger.info(f"\nTax Rates:")
     for tax, rate in decimal_rates.items():
         logger.info(f"{tax}: {rate:.4f}")
 
@@ -228,9 +279,12 @@ def calculate_custom_charges(tax_rates, cif, caf):
     EXC023_charge = round(base_value_4 * decimal_rates.get("EXC023", 0), 2)
     logger.info(f"EXC023 ({decimal_rates.get('EXC023', 0):.4f}): {base_value_4:.2f} * {decimal_rates.get('EXC023', 0):.4f} = {EXC023_charge:.2f} JMD")
 
-    total_custom_charges = round(ID_01_charge + ASD05_charge + GCT_06_charge + EXC023_charge + SCTA08_charge + SCTS18_charge + SCTF028_charge + SCF90_charge + ENVL20_charge + CAF_charge, 2)
+    total_custom_charges = round(ID_01_charge + ASD05_charge + GCT_06_charge + EXC023_charge + SCTA08_charge + SCTS18_charge + 
+                               SCTF028_charge + SCF90_charge + ENVL20_charge + CAF_charge, 2)
     logger.info(f"\nTotal Custom Charges:")
-    logger.info(f"{ID_01_charge:.2f} + {ASD05_charge:.2f} + {GCT_06_charge:.2f} + {EXC023_charge:.2f} + {SCTA08_charge:.2f} + {SCTS18_charge:.2f} + {SCTF028_charge:.2f} + {SCF90_charge:.2f} + {ENVL20_charge:.2f} + {CAF_charge:.2f} = {total_custom_charges:.2f} JMD")
+    logger.info(f"{ID_01_charge:.2f} + {ASD05_charge:.2f} + {GCT_06_charge:.2f} + {EXC023_charge:.2f} + {SCTA08_charge:.2f} + "
+               f"{SCTS18_charge:.2f} + {SCTF028_charge:.2f} + {SCF90_charge:.2f} + {ENVL20_charge:.2f} + {CAF_charge:.2f} = "
+               f"{total_custom_charges:.2f} JMD")
 
     result = {
         "base_value_1 (CIF)": base_value_1,
@@ -249,64 +303,6 @@ def calculate_custom_charges(tax_rates, cif, caf):
         "CAF_charge": CAF_charge,
         "total_custom_charges": total_custom_charges
     }
-    return {k: v for k, v in result.items() if v > 0}, tax_rates
-
-def determine_caf_rate(transaction_type, package_type, cif_value, input_currency):
-    """
-    Determines the CAF rate based on the transaction type, package type, CIF value, and input currency.
-
-    Parameters:
-        transaction_type (str): The type of transaction (e.g., 'IMS4', 'IM4').
-        package_type (str): The type of package or product (e.g., 'motor vehicle').
-        cif_value (float): The CIF (Cost, Insurance, and Freight) value of the goods.
-        input_currency (str): The currency code of the input CIF value.
-
-    Returns:
-        float: The determined CAF rate in JMD.
-    """
-    if not transaction_type:
-        raise ValueError("Transaction type cannot be None")
     
-    logger.info(f"Determining CAF rate for: transaction_type={transaction_type}, "
-                f"package_type={package_type}, cif_value={cif_value}, input_currency={input_currency}")
-
-    # Check for motor vehicle package type
-    if package_type.lower() == 'motor vehicle':
-        logger.info("Motor vehicle detected. Returning fixed CAF rate of 57500.0 JMD")
-        return 57500.0
-
-    # Convert CIF value to USD if it's not already in USD
-    if input_currency.upper() != 'USD':
-        usd_rate = fetch_currency_rate('USD')
-        input_currency_rate = fetch_currency_rate(input_currency)
-        cif_value_usd = round(cif_value * (input_currency_rate / usd_rate), 2)
-        logger.info(f"Converted CIF value from {input_currency} to USD: {cif_value_usd}")
-    else:
-        cif_value_usd = cif_value
-        logger.info(f"CIF value already in USD: {cif_value_usd}")
-
-    # Check for IMS4 transaction type (household items)
-    if transaction_type.upper() == 'IMS4':
-        if cif_value_usd < 5000:
-            logger.info("IMS4 transaction with CIF < 5000 USD. Returning CAF rate of 2500.0 JMD")
-            return 2500.0
-        else:
-            logger.info("IMS4 transaction with CIF >= 5000 USD. Treating as IM4, returning CAF rate of 10000.0 JMD")
-            return 10000.0
-
-    # Check for IM4 transaction type (commercial items)
-    if transaction_type.upper() == 'IM4':
-        logger.info("IM4 transaction. Returning fixed CAF rate of 10000.0 JMD")
-        return 10000.0
-
-    # Default case
-    logger.warning(f"Unrecognized transaction type: {transaction_type}. Defaulting to 10000.0 JMD CAF.")
-    return 10000.0
-
-def calculate_additional_im4_rate(cif_value):
-    """
-    Placeholder function to calculate additional CAF rate for IM4 transactions based on CIF value.
-    Modify this function based on the additional rules for IM4 transactions.
-    """
-    # Placeholder logic; modify as needed
-    return 10000  # Base rate, or more complex calculations
+    # Only return charges that are greater than 0
+    return {k: v for k, v in result.items() if v > 0}, original_rates

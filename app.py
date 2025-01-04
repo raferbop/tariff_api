@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 import pytz
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
 from utils.customs_computation import (
     calculate_cif,
@@ -18,7 +19,7 @@ from utils.customs_computation import (
     determine_caf_rate
 )
 from utils.fx_rates_scraper import check_and_update_fx_rates
-from utils.database import SessionLocal, engine, Base, init_db
+from utils.database import SessionLocal, engine, Base, init_db, FXRate
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -66,7 +67,7 @@ class CustomsRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database and update FX rates on startup"""
+    """Initialize database and validate currency data on startup"""
     try:
         # Create database tables
         Base.metadata.create_all(bind=engine)
@@ -74,10 +75,19 @@ async def startup_event():
         # Initialize database with tax rates if needed
         init_db()
         
-        # Update FX rates
+        # Validate currency data
         db = SessionLocal()
         try:
+            # Check if we have any FX rates
+            latest_date = db.query(FXRate.date).order_by(desc(FXRate.date)).first()
+            if not latest_date:
+                logger.warning("No FX rates found in database!")
+            else:
+                logger.info(f"Latest FX rates date: {latest_date[0]}")
+            
+            # Update FX rates
             await check_and_update_fx_rates(db)
+            
         finally:
             db.close()
             
@@ -102,7 +112,8 @@ async def calculate_cif_endpoint(
             product_currency=request.product_currency,
             freight_charges=request.freight_charges,
             freight_currency=request.freight_currency,
-            mode_of_transportation=request.mode_of_transportation
+            mode_of_transportation=request.mode_of_transportation,
+            db=db  # Pass the database session
         )
         return result
     except Exception as e:
@@ -121,11 +132,12 @@ async def calculate_customs_endpoint(
             product_currency=request.product_currency,
             freight_charges=request.freight_charges,
             freight_currency=request.freight_currency,
-            mode_of_transportation=request.mode_of_transportation
+            mode_of_transportation=request.mode_of_transportation,
+            db=db  # Pass the database session
         )
         
         # Get tax rates
-        tax_rates = get_tax_rates(request.hs_code)
+        tax_rates = get_tax_rates(request.hs_code, db)  # Pass the database session
         if not tax_rates:
             raise HTTPException(
                 status_code=404,
@@ -137,7 +149,8 @@ async def calculate_customs_endpoint(
             transaction_type=request.transaction_type,
             package_type=request.package_type,
             cif_value=cif_result['cif_usd'],
-            input_currency='USD'
+            input_currency='USD',
+            db=db  # Pass the database session
         )
         
         # Calculate customs charges
