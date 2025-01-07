@@ -40,6 +40,28 @@ class FXRate:
     selling_rate: float
     timestamp: datetime
 
+def should_get_previous_day(current_date=None, country=None):
+    """
+    Determine if we should get rates for the previous business day.
+    
+    Args:
+        current_date: Date to check (defaults to today)
+        country: Country name to check against
+        
+    Returns:
+        bool: True if we should get previous day's rates
+    """
+    if current_date is None:
+        current_date = datetime.now(Config.get_timezone(country)).date()
+    
+    # Check if it's weekend
+    is_weekend = current_date.weekday() >= 5
+    
+    # Check if it's a holiday
+    is_holiday = Config.is_holiday(current_date, country)
+    
+    return is_weekend or is_holiday
+
 def get_last_business_day(current_date=None, country=None):
     """
     Get the last business day, taking into account weekends and holidays.
@@ -55,17 +77,27 @@ def get_last_business_day(current_date=None, country=None):
         current_date = datetime.now(Config.get_timezone(country)).date()
     
     check_date = current_date
+    
+    # If current day is weekend, start from Friday
+    if check_date.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        days_to_subtract = check_date.weekday() - 4  # Go back to Friday
+        check_date = check_date - timedelta(days=days_to_subtract)
+    
     while True:
-        # If it's Monday, go back to Friday
-        if check_date.weekday() == 0:  # Monday
-            check_date -= timedelta(days=3)
-        else:
+        # If check_date is a holiday, go back one day
+        if Config.is_holiday(check_date, country):
             check_date -= timedelta(days=1)
-        
-        # Check if it's a business day (not weekend and not holiday)
-        if check_date.weekday() < 5 and not Config.is_holiday(check_date, country):
-            return check_date
+            continue
             
+        # If we hit a weekend while looking back, go to previous Friday
+        if check_date.weekday() >= 5:
+            days_to_friday = check_date.weekday() - 4
+            check_date -= timedelta(days=days_to_friday)
+            continue
+            
+        # If we get here, we've found a business day
+        return check_date
+        
         # Safety check to prevent infinite loop
         if (current_date - check_date).days > 10:
             logger.error("Could not find a business day in the last 10 days")
@@ -278,26 +310,22 @@ def save_to_database(rates: List[FXRate]) -> tuple[int, int]:
     finally:
         db.close()
 
-# Add this function to fx_rates_scraper.py, just before the main() function
-
 async def check_and_update_fx_rates(db: Session) -> None:
     """
     Check and update FX rates in the database.
     This function is used by FastAPI endpoints to trigger FX rate updates.
-    
-    Args:
-        db: SQLAlchemy database session
-        
-    Raises:
-        Exception: If FX rate update process fails
     """
     try:
         country = Config.DEFAULT_COUNTRY
         current_date = datetime.now(Config.get_timezone(country)).date()
         
-        if Config.is_holiday(current_date, country):
-            holiday_name = Config.get_holiday_name(current_date, country)
-            logger.info(f"Current date ({current_date}) is a holiday: {holiday_name}")
+        if should_get_previous_day(current_date, country):
+            if current_date.weekday() >= 5:
+                logger.info(f"Current date ({current_date}) is a weekend")
+            else:
+                holiday_name = Config.get_holiday_name(current_date, country)
+                logger.info(f"Current date ({current_date}) is a holiday: {holiday_name}")
+            
             target_date = get_last_business_day(current_date, country)
             logger.info(f"Processing rates for last business day: {target_date}")
         else:
@@ -324,9 +352,13 @@ def main():
         country = Config.DEFAULT_COUNTRY
         current_date = datetime.now(Config.get_timezone(country)).date()
         
-        if Config.is_holiday(current_date, country):
-            holiday_name = Config.get_holiday_name(current_date, country)
-            logger.info(f"Current date ({current_date}) is a holiday: {holiday_name}")
+        if should_get_previous_day(current_date, country):
+            if current_date.weekday() >= 5:
+                logger.info(f"Current date ({current_date}) is a weekend")
+            else:
+                holiday_name = Config.get_holiday_name(current_date, country)
+                logger.info(f"Current date ({current_date}) is a holiday: {holiday_name}")
+            
             target_date = get_last_business_day(current_date, country)
             logger.info(f"Processing rates for last business day: {target_date}")
         else:

@@ -75,25 +75,16 @@ class Config:
         'land': 'Land Transport'
     }
 
-    # Package types
-    PACKAGE_TYPES = {
-        'commercial': 'Commercial Package',
-        'personal': 'Personal Effects',
-        'gift': 'Gift Package'
-    }
-
     # Transaction types
     TRANSACTION_TYPES = {
-        'import': 'Import',
-        'export': 'Export',
-        'transit': 'Transit'
+        'commercial': 'Commercial',
+        'personal': 'Personal'
     }
 
     # Default CAF rates (Customs Administration Fee)
     DEFAULT_CAF_RATES = {
-        'commercial': 0.05,  # 5% for commercial imports
-        'personal': 0.025,   # 2.5% for personal effects
-        'gift': 0.02        # 2% for gifts
+        'commercial': 0,    # 0 for commercial
+        'personal': 2500    # Fixed rate of 2500 for personal
     }
 
     @classmethod
